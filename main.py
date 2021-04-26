@@ -4,7 +4,6 @@ The Pytorch-Geometric Implementation of GCNN model from the following paper
 https://arxiv.org/abs/1902.06673
 """
 
-import argparse
 import time
 from tqdm import tqdm
 
@@ -14,44 +13,22 @@ from torch.utils.data import random_split
 from torch_geometric.data import DataLoader
 from torch.nn import Linear
 from torch_geometric.nn import global_mean_pool, GATConv
-from torch_geometric.datasets import TUDataset
+from get_data import createUserDB
 
 from sklearn.metrics import f1_score, accuracy_score, recall_score, precision_score
 
-parser = argparse.ArgumentParser()
+from config import EPOCHS, LR, BATCH_SIZE, WEIGHT_DECAY, DEVICE
 
-# original model parameters
-parser.add_argument('--seed', type=int, default=777, help='random seed')
-parser.add_argument('--device', type=str, default='cuda:0', help='specify cuda devices')
-
-# hyper-parameters
-parser.add_argument('--dataset', type=str, default='PROTEINS', help='DD/PROTEINS/NCI1/NCI109/Mutagenicity/ENZYMES')
-parser.add_argument('--batch_size', type=int, default=128, help='batch size')
-parser.add_argument('--lr', type=float, default=0.001, help='learning rate')
-parser.add_argument('--weight_decay', type=float, default=0.01, help='weight decay')
-parser.add_argument('--nhid', type=int, default=128, help='hidden size')
-parser.add_argument('--epochs', type=int, default=100, help='maximum number of epochs')
-
-args = parser.parse_args()
-torch.manual_seed(args.seed)
-if torch.cuda.is_available():
-	torch.cuda.manual_seed(args.seed)
-
-dataset = TUDataset('data/', name=args.dataset, use_node_attr=True)
-
-args.num_classes = dataset.num_classes
-args.num_features = dataset.num_features
-
-print(args)
+dataset = createUserDB()
 
 num_training = int(len(dataset) * 0.6)
 num_val = int(len(dataset) * 0.1)
 num_test = len(dataset) - (num_training + num_val)
 training_set, validation_set, test_set = random_split(dataset, [num_training, num_val, num_test])
 
-train_loader = DataLoader(training_set, batch_size=args.batch_size, shuffle=True)
-val_loader = DataLoader(validation_set, batch_size=args.batch_size, shuffle=False)
-test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=False)
+train_loader = DataLoader(training_set, batch_size=BATCH_SIZE, shuffle=True)
+val_loader = DataLoader(validation_set, batch_size=BATCH_SIZE, shuffle=False)
+test_loader = DataLoader(test_set, batch_size=BATCH_SIZE, shuffle=False)
 
 
 class Net(torch.nn.Module):
@@ -59,7 +36,7 @@ class Net(torch.nn.Module):
 		super(Net, self).__init__()
 
 		self.num_features = dataset.num_features
-		self.nhid = args.nhid
+		self.nhid = HIDDEN
 
 		self.conv1 = GATConv(self.num_features, self.nhid * 2)
 		self.conv2 = GATConv(self.nhid * 2, self.nhid * 2)
@@ -76,6 +53,7 @@ class Net(torch.nn.Module):
 		x = F.dropout(x, p=0.5, training=self.training)
 		x = self.fc2(x)
 		return F.log_softmax(x, dim=-1)
+		
 
 
 def eval(log):
@@ -103,7 +81,7 @@ def compute_test(loader):
 	out_log = []
 	with torch.no_grad():
 		for data in loader:
-			data = data.to(args.device)
+			data = data.to(DEVICE)
 			out = model(data.x, data.edge_index, data.batch)
 			y = data.y
 			out_log.append([F.softmax(out, dim=1), y])
@@ -111,9 +89,13 @@ def compute_test(loader):
 	return eval(out_log), loss_test
 
 
-model = Net().to(args.device)
-model = model.to(args.device)
-optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+model = Net().to(DEVICE)
+model = model.to(DEVICE)
+optimizer = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
+
+def getTwitterIds():
+	ids = set()
+	
 
 
 if __name__ == '__main__':
@@ -122,12 +104,12 @@ if __name__ == '__main__':
 
 	t = time.time()
 	model.train()
-	for epoch in tqdm(range(args.epochs)):
+	for epoch in tqdm(range(EPOCHS)):
 		loss_train = 0.0
 		correct = 0
 		for i, data in enumerate(train_loader):
 			optimizer.zero_grad()
-			data = data.to(args.device)
+			data = data.to(EPOCHS)
 			out = model(data.x, data.edge_index, data.batch)
 			y = data.y
 			loss = F.nll_loss(out, y)
