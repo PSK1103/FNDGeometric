@@ -1,16 +1,12 @@
 import pandas as pd
 import numpy as np
-from tqdm import tqdm
-from multiprocessing.pool import Pool
 import os
-import json
 import time
 from twython import Twython, TwythonError
 from config import DATA_DIR, DEVICE
-import tf_geometric as tfg
-import tensorflow as tf
 from util.objects import User
 from twitter_keys import APP_SECRET, APP_KEY, ACCESS_TOKEN
+from stellargraph import IndexedArray, StellarGraph
 if ACCESS_TOKEN == '':
     twitter = Twython(APP_KEY,APP_SECRET)
     ACCESS_TOKEN = twitter.obtain_access_token()
@@ -54,7 +50,6 @@ def createUserDB():
         users = {}
         gossipcop_fake = pd.read_csv(DATA_DIR + '/gossipcop_fake.csv')
         gossipcop_fake.dropna()
-        gossipcop_fake = gossipcop_fake
         gossipcop_real = pd.read_csv(DATA_DIR + '/gossipcop_real.csv')
         gossipcop_real.dropna()
         politifact_real = pd.read_csv(DATA_DIR+ '/politifact_real.csv')
@@ -193,15 +188,14 @@ def createUserDB():
     elif not os.path.exists(DATA_DIR + '/users'):
         twt2user = open(DATA_DIR + '/twt2user','r')
         print('found twt2user')
-        print('verifying all tweet data downloaded')
         users = {}
         for line in twt2user.readlines():
             try:
                 data = line.split()
-                user = User(uid=data[1],verified=data[2])
+                user = User(uid=int(data[1]),verified=int(data[2]))
                 if user.uid not in users:
                     users[user.uid] = user
-                if data[3] == 1:
+                if data[3] == '1':
                     users[user.uid].real_news()
                 else:
                     users[user.uid].fake_news()
@@ -229,74 +223,99 @@ def createUserDB():
             user.set_following(getFollowing(user.uid))
             user_data.write('{},{},{},{},{}'.format(str(user.uid),str(user.verified),str(user.rating),' '.join([str(id) for id in user.followers]),' '.join(str(id) for id in user.following)))
         user_data.close()
+    else:
+        print('verifying dataset')
+        twt2user = open(DATA_DIR + '/twt2user','r')
+        users_list = []
+        user_ids = []
+        for line in twt2user.readlines():
+            try:
+                data = line.split()
+                user = User(uid=int(data[1]),verified=int(data[2]))
+                if user.uid not in user_ids:
+                    users_list.append(user)
+                    user_ids.append(user.uid)
+                else:
+                    user = users_list[users_list.index(user.uid)]
+                if data[3] == '1':
+                    user.real_news()
+                else:
+                    user.fake_news()
+                users_list[users_list.index(user.uid)] = user
+            except:
+                pass
 
-    createDatasetFiles()
+        print('Total {} users in dataset'.format(len(users_list)))
+        user_data = open(DATA_DIR + '/users','a')
+        user_data_val = open(DATA_DIR + '/users','r')
+        val_user_ids = [int(data.split(',')[0]) for data in user_data_val.readlines()]
 
-    # x,y,edge_index = createGraphTensors(users_list)
+        iter = 0
+        i = 0            
+        first = True
+        for user in users_list:
+            print(user.uid)
+            if iter < len(val_user_ids):
+                if val_user_ids[iter] == user.uid:
+                    iter += 1
+                    continue
+            i += 1
+            if i>=15:
+                user_data.close()
+                user_data = open(DATA_DIR + '/users','a')
+                print('waiting for api cooldown')
+                time.sleep(15*60)
+                i = 1
+            try:
+                user.compute_rating()
+                user.set_followers(getFollowers(user.uid))
+                user.set_following(getFollowing(user.uid))
+                if first:
+                    first = False
+                else:
+                    user_data.write('\n')
+                user_data.write('{},{},{},{},{}'.format(str(user.uid),str(user.verified),str(user.rating),' '.join([str(id) for id in user.followers]),' '.join(str(id) for id in user.following)))
+            except:
+                pass
+        user_data.close()
 
-    # dataset = tfg.Graph(x=x,y=y, edge_index=edge_index)
-    # dataset.convert_data_to_tensor()
-    # outputs = tfg.layers.GCN(units=dataset.num_nodes,activation=tf.nn.relu,)
-    return None
-    
-def createDatasetFiles():
-    """
-    creates tensors to create a Dataset object
+    return createGraph()
 
-    Args:
-        users (list): list of User objects
 
-    Returns:
-        x (tensor): tensor of features of each node
-        y (tensor): tensor of labels of each node
-        edges (tensor): tensor containing edge indices in the COO format
-    """
-
+def createGraph():
+    users = {}
     users_list = []
-
     users_data = open(DATA_DIR + '/users','r')
     for line in users_data.readlines():
         data = line.split(',')
         user = User(int(data[0]),int(data[1]),rating=float(data[2]),followers=[int(id) for id in data[3].split()],following=[int(id) for id in data[4].split()])
-        users_list.append(user)
+        users[user.uid] = user
 
-    idx2uid = {}
-    uid2idx = {}
-    for i,uid in enumerate(users_list):
-        idx2uid[i+1] = uid
-        uid2idx[uid] = i+1
-
-    FND_A = open(DATA_DIR + '/FND_A.txt','w')
-    FND_gi = open(DATA_DIR + '/FND_graph_indicator.txt','w')
-    FND_na = open(DATA_DIR + '/FND_node_attributes.txt','w')
-    FND_nl = open(DATA_DIR + '/FND_node_labels.txt','w')
-    first = True
-
-    for user in users_list:
-        if first:
-            first = False
-        else:
-            FND_gi.write('\n')
-            FND_A.write('\n')
-            FND_na.write('\n')
-            FND_nl.write('\n')
-
+    node_features = []
+    node_labels = {}
+    nodes = []
+    edges = []
+    for _,user in users.items():
+        nodes.append(str(user.uid))
+        node_labels[str(user.uid)] = str(user.rating>0)
+        node_features.append([user.rating,float(user.verified),float(len(user.followers)),float(len(user.following))])
         for id in user.followers + user.following:
-            if id in uid2idx:   
-                FND_A.write('{}, {}\n'.format(uid2idx[user.uid],uid2idx[uid]))
-                FND_A.write('{}, {}'.format(uid2idx[uid],uid2idx[user.uid]))
-        FND_na.write('{}, {}, {}, {}'.format(user.rating,len(user.following),len(user.followers),int(user.verified)))
-        FND_gi.write('1')
-        FND_nl.write(str(int(user.rating>0)))
-
-        
-    FND_gi.close()
-    FND_A.close()
-
-    FND_gl = open(DATA_DIR + '/FND_graph_labels.txt','w')
-    FND_gl.write('1')
-    FND_gl.close()
-
+            if id in users:
+                edges.append([str(user.uid),str(id)])
+    nodes = IndexedArray(np.array(node_features,dtype=np.float32),nodes)
+    for edge in edges:
+        try:
+            edges.remove([edge[1],edge[0]])
+        except:
+            pass
+    edges = np.transpose(edges)
+    edges = pd.DataFrame({
+        'source':edges[0],'target':edges[1]
+    })
+    sg = StellarGraph(nodes,edges)
+    node_labels = pd.Series(data=node_labels,index=None)
+    print(sg.info())
+    return sg,node_labels
 
 if __name__ == '__main__':
     createUserDB()
