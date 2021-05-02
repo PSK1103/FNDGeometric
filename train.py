@@ -1,9 +1,11 @@
 from model import create_graph_classification_model
-from get_data import createUserDB,createGraph
+from get_data import createGraph
 from config import EPOCHS, BATCH_SIZE
 from stellargraph.mapper import FullBatchNodeGenerator
 from sklearn import model_selection,preprocessing
 import stellargraph as sg
+import pandas as pd
+import matplotlib.pyplot as plt
 
 from tensorflow.keras.callbacks import EarlyStopping
 import pickle
@@ -25,9 +27,12 @@ if __name__ == '__main__':
     train_samples, test_samples = model_selection.train_test_split(
         labels, train_size=0.7, test_size=None, stratify=labels
     )
-    val_samples, test_samples = model_selection.train_test_split(
+    val_samples,test_samples = model_selection.train_test_split(
         test_samples, train_size=0.33, test_size=None, stratify=test_samples
     )
+    # val_samples, test_samples = model_selection.train_test_split(
+    #     test_samples, train_size=0.5, test_size=None, stratify=test_samples
+    # )
 
     generator = FullBatchNodeGenerator(graph, method="gcn")
 
@@ -41,7 +46,6 @@ if __name__ == '__main__':
 
     val_gen = generator.flow(val_samples.index, val_targets)
 
-    es_callback = EarlyStopping(monitor="val_acc", patience=50, restore_best_weights=True)
     model = create_graph_classification_model(generator)
 
     history = model.fit(
@@ -49,33 +53,26 @@ if __name__ == '__main__':
         epochs=EPOCHS,
         validation_data=val_gen,
         verbose=2,
-        shuffle=True,
-        callbacks=[es_callback],
-        batch_size=BATCH_SIZE
+        shuffle=False,
+        batch_size=BATCH_SIZE,
+        validation_batch_size=BATCH_SIZE
     )
 
-    with open('history.pkl','w') as fp:
-        pickle.dump(history.history,fp)
+    with open('history.pkl', 'wb') as file_pi:
+        pickle.dump(history.history, file_pi)
 
-    # train_graphs, test_graphs = model_selection.train_test_split(
-    # graphs, train_size=0.8, test_size=None, stratify=graph_labels)
-
-    # train_gen = generator.flow(
-    #     list(train_graphs.index - 1),
-    #     targets=train_graphs.values,
-    #     batch_size=50,
-    #     symmetric_normalization=False,
-    # )
-
-    # test_gen = generator.flow(
-    #     list(test_graphs.index - 1),
-    #     targets=test_graphs.values,
-    #     batch_size=1,
-    #     symmetric_normalization=False,
-    # )
-
-    # print('here')
-
-    # history = model.fit(train_gen,epochs=EPOCHS,verbose=1,validation_data=test_gen, batch_size=BATCH_SIZE)
-
-    sg.utils.plot_history(history)
+    plt.plot(history.history['acc'])
+    plt.plot(history.history['val_acc'])
+    plt.title('model accuracy')
+    plt.ylabel('accuracy')
+    plt.xlabel('epoch')
+    plt.legend(['train', 'validation'], loc='upper left')
+    plt.show()
+    # "Loss"
+    plt.plot(history.history['loss'])
+    plt.plot(history.history['val_loss'])
+    plt.title('model loss')
+    plt.ylabel('loss')
+    plt.xlabel('epoch')
+    plt.legend(['train', 'validation'], loc='upper left')
+    plt.show()

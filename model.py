@@ -3,7 +3,7 @@ from tensorflow.keras import Model
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.layers import Dense
 from tensorflow.keras.losses import binary_crossentropy
-from config import HIDDEN
+from config import HIDDEN,LR
 
 def create_graph_classification_model(generator):
     gc_model = GCN(
@@ -19,6 +19,6 @@ def create_graph_classification_model(generator):
 
     # Let's create the Keras model and prepare it for training
     model = Model(inputs=x_inp, outputs=predictions)
-    model.compile(optimizer=Adam(0.005), loss=binary_crossentropy, metrics=["acc"])
+    model.compile(optimizer=Adam(LR), loss=binary_crossentropy, metrics=["acc"])
 
     return model
